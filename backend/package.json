@@ -7,7 +7,8 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "migrate": "node migrate.js",
-    "recreate-index": "node recreate-index.js"
+    "recreate-index": "node recreate-index.js",
+    "reindex": "node reindex.js"
   },
   "dependencies": {
     "@elastic/elasticsearch": "^8.11.0",

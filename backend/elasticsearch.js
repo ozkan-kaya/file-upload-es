@@ -198,6 +198,20 @@ async function deleteDocument(filename) {
     }
 }
 
+// Delete the entire index
+async function deleteIndex() {
+    try {
+        if (await client.indices.exists({ index: INDEX_NAME })) {
+            await client.indices.delete({ index: INDEX_NAME });
+            console.log(`Index '${INDEX_NAME}' deleted`);
+        } else {
+            console.log(`Index '${INDEX_NAME}' does not exist`);
+        }
+    } catch (error) {
+        console.error('Delete index error:', error.message);
+        throw error;
+    }
+}
 
 async function checkConnection() {
     try {
@@ -215,5 +229,6 @@ module.exports = {
     indexDocument,
     searchDocuments,
     deleteDocument,
+    deleteIndex,
     checkConnection
 };
