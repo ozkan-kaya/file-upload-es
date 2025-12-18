@@ -1,0 +1,162 @@
+<div class="container mt-6">
+  <div class="columns">
+    <div class="column is-10 is-offset-1">
+
+      <!-- Upload Section -->
+      <div class="box upload-section">
+        <h1 class="title is-5 has-text-centered mb-3">
+          <span class="icon-text">
+            <span class="icon has-text-info">
+              <i class="fas fa-cloud-upload-alt mr-2"></i>
+            </span>
+            <span>Dosya Yükle</span>
+          </span>
+        </h1>
+
+        <div class="has-text-centered mb-3">
+          <div class="notification is-info is-light py-2 px-4 mb-0" style="display: inline-block;">
+            <strong>Desteklenen Dosya Türleri:</strong> PDF, Word, Excel
+          </div>
+        </div>
+
+        <div class="field mb-2">
+          <div class="file has-name is-fullwidth is-info">
+            <label class="file-label">
+              <input class="file-input" type="file" id="fileInput" accept=".pdf,.doc,.docx,.xls,.xlsx"
+                (change)="onFileSelected($event)" [disabled]="uploadProgress">
+              <span class="file-cta">
+                <span class="file-icon">
+                  <i class="fas fa-upload"></i>
+                </span>
+                <span class="file-label">Seç…</span>
+              </span>
+              <span class="file-name">
+                {{ selectedFile ? selectedFile.name : 'Seçilmedi' }}
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="control">
+            <button class="button is-primary is-fullwidth" [class.is-loading]="uploadProgress"
+              [disabled]="!selectedFile || uploadProgress" (click)="onUpload()">
+              <span class="icon">
+                <i class="fas fa-paper-plane"></i>
+              </span>
+              <span>Yükle</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Files List Section -->
+      <div class="box mt-5">
+        <h2 class="title is-4 has-text-centered">
+          <span class="icon-text">
+            <span class="icon has-text-success">
+              <i class="fas fa-folder-open"></i>
+            </span>
+            <span>
+              @if (isShowingSearchResults) {
+              Dosyalar ({{ filteredFiles.length }} / {{ files.length }})
+              } @else {
+              Dosyalar ({{ files.length }})
+              }
+            </span>
+          </span>
+        </h2>
+
+        <!-- Search Field -->
+        <div class="field">
+          <label class="label">Dosya Adı veya Dosya İçeriğine Göre Arama Yapın</label>
+          <div class="control has-icons-left">
+            <input class="input" type="text" placeholder="Ara..." [(ngModel)]="searchTerm"
+              (ngModelChange)="onSearchChange($event)">
+            <span class="icon is-left">
+              <i class="fas fa-search"></i>
+            </span>
+          </div>
+        </div>
+
+        @if (filteredFiles.length === 0 && files.length === 0) {
+        <div class="notification is-info is-light has-text-centered py-2 px-4 mb-0">
+          <span class="icon">
+            <i class="fas fa-info-circle"></i>
+          </span>
+          Henüz yüklenmiş dosya bulunmuyor.
+        </div>
+        } @else if (filteredFiles.length === 0 && files.length > 0) {
+        <div class="notification is-warning is-light has-text-centered">
+          <span class="icon">
+            <i class="fas fa-search"></i>
+          </span>
+          Arama kriterine uygun dosya bulunamadı.
+        </div>
+        } @else {
+        <div class="table-container">
+          <table class="table is-fullwidth is-striped is-hoverable">
+            <thead>
+              <tr>
+                <th style="width: 50%;"><i class="fas fa-file-alt"></i> Dosya Adı</th>
+                <th style="width: 15%;"><i class="fas fa-weight-hanging"></i> Boyut</th>
+                <th style="width: 25%;"><i class="fas fa-calendar"></i> Yüklenme Tarihi</th>
+                <th style="width: 10%;"><i class="fas fa-download"></i> İndir</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (file of filteredFiles; track file.filename) {
+              <tr>
+                <td>
+                  <div class="filename-cell">
+                    <span class="icon mr-2" [ngClass]="getFileIcon(file.mimetype)">
+                      <i class="fas" [ngClass]="getFileIcon(file.mimetype).split(' ')[0]"></i>
+                    </span>
+                    <span class="file-name-text" [innerHTML]="getHighlightedFilename(file)"></span>
+                  </div>
+                  @if (hasContentMatch(file)) {
+                  <div class="mt-2">
+                    <small class="has-text-grey-dark" [innerHTML]="getHighlightSnippet(file)"></small>
+                  </div>
+                  }
+                </td>
+                <td>
+                  <span class="tag is-info is-light">
+                    {{ formatFileSize(file.size) }}
+                  </span>
+                </td>
+                <td>{{ formatDate(file.uploadDate) }}</td>
+                <td>
+                  <a [href]="getFileUrl(file.path)" class="button is-small is-success is-light" target="_blank"
+                    download>
+                    <span class="icon">
+                      <i class="fas fa-download"></i>
+                    </span>
+                    <span>İndir</span>
+                  </a>
+                </td>
+              </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        }
+      </div>
+
+    </div>
+  </div>
+</div>
+@if (uploadMessage) {
+<div class="notification toast-notification" [class.is-success]="uploadMessage.includes('indexlendi')"
+  [class.is-danger]="uploadMessage.includes('hata')" [class.fade-out]="isFading">
+  <button class="delete" (click)="uploadMessage = ''"></button>
+  <span class="icon-text">
+    <span class="icon">
+      <i class="fas" [class.fa-check-circle]="uploadMessage.includes('indexlendi')"
+        [class.fa-exclamation-circle]="uploadMessage.includes('hata')"></i>
+    </span>
+    <span>{{ uploadMessage }}</span>
+  </span>
+</div>
+}

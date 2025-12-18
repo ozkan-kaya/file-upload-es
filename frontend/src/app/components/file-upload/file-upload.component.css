@@ -1,0 +1,89 @@
+/* File Upload Component Styles */
+.file-name-text {
+    max-width: 450px;
+    word-break: break-all;
+    white-space: normal;
+    display: inline-block;
+}
+
+.filename-cell {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.table-container {
+    max-height: 480px;
+    overflow-y: auto;
+    overflow-x: auto;
+    overscroll-behavior: contain;
+}
+
+
+.table th,
+.table td {
+    vertical-align: middle !important;
+}
+
+.upload-section {
+    padding: 1rem !important;
+}
+
+.toast-notification {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    z-index: 1000;
+    min-width: 300px;
+    max-width: 400px;
+    margin: 0 !important;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+    border-radius: 8px !important;
+    animation: slideIn 0.3s ease-out;
+}
+
+.toast-notification .delete {
+    position: absolute;
+    right: 0.5rem;
+    top: 0.5rem;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.fade-out {
+    animation: fadeOut 1s ease-in forwards;
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+    }
+
+    to {
+        opacity: 0;
+    }
+}
+
+::ng-deep .highlight {
+    background-color: #ffeb3b !important;
+    color: black !important;
+    padding: 2px !important;
+    border-radius: 5px !important;
+}
+
+::ng-deep .highlight-fuzzy {
+    background-color: #BBDEFB !important;
+    color: black !important;
+    padding: 2px !important;
+    border-radius: 5px !important;
+}
