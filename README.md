@@ -69,11 +69,14 @@ Scriptlerin arka planda kullandığı temel dosyalar şunlardır:
 *   **`backend/index.js`**: Express sunucusunu ayağa kaldırır, API rotalarını tanımlar ve statik dosyaları sunar.
 *   **`backend/elasticsearch.js`**: Elasticsearch bağlantısını yönetir. İndeksleme, silme ve karmaşık arama sorgularını (fuzzy, prefix, phrase matching) burada oluşturur.
 *   **`backend/textExtractor.js`**: Yüklenen dosyaların (PDF, Word, Excel) içeriğini metne dönüştüren servistir.
+*   **`backend/sync.js`**: Sunucu her başlatıldığında otomatik olarak çalışan senkronizasyon modülüdür. `uploads/` klasörü ile Elasticsearch veritabanını karşılaştırır:
+    > **Otomatik Senkronizasyon Özellikleri:**
+    > *   Yeni Dosya Tespiti:`uploads/` klasörüne manuel olarak eklenen desteklenen dosyaları (PDF, Word, Excel) otomatik olarak Elasticsearch'e indeksler.
+    > *   Silinmiş Dosya Temizliği: `uploads/` klasöründen manuel olarak silinmiş ancak Elasticsearch'te kayıtlı olan dosyaları veritabanından kaldırır.
 *   **`backend/reindex.js`**: `npm run reindex` komutu ile çalışan scripttir. İndeksleri sıfırlayıp tüm dosyaları yeniden indeksler.
     > **Olası Kullanım Nedenleri:**
     > *   Elasticsearch arama algoritması veya analizörleri (`elasticsearch.js`) değiştiğinde.
     > *   Metin ayıklama mantığı (`textExtractor.js`) güncellendiğinde.
-    > *   `uploads` klasörüne sistem dışından manuel dosya eklendiğinde veya silindiğinde veritabanını senkronize etmek için.
 
 ## ▶ Çalıştırma
 

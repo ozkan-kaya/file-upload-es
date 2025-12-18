@@ -213,6 +213,29 @@ async function deleteIndex() {
     }
 }
 
+// Get all documents from Elasticsearch
+async function getAllDocuments() {
+    try {
+        const response = await client.search({
+            index: INDEX_NAME,
+            body: {
+                query: {
+                    match_all: {}
+                },
+                size: 10000 // Get all documents
+            }
+        });
+        return response.hits.hits;
+    } catch (error) {
+        if (error.meta?.statusCode === 404) {
+            // Index doesn't exist yet
+            return [];
+        }
+        console.error('Get all documents error:', error.message);
+        throw error;
+    }
+}
+
 async function checkConnection() {
     try {
         await client.ping();
@@ -230,5 +253,6 @@ module.exports = {
     searchDocuments,
     deleteDocument,
     deleteIndex,
+    getAllDocuments,
     checkConnection
 };

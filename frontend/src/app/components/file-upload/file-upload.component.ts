@@ -213,6 +213,43 @@ export class FileUploadComponent implements OnInit, OnDestroy {
         return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
     }
 
+    deleteFile(file: FileInfo): void {
+        const displayName = file.originalname || file.filename;
+        const confirmMessage = `"${displayName}" dosyasını silmek istediğinizden emin misiniz?`;
+
+        if (confirm(confirmMessage)) {
+            this.fileUploadService.deleteFile(file.filename).subscribe({
+                next: (response) => {
+                    this.uploadMessage = response.message;
+                    this.loadFiles();
+
+                    // Clear message after 5 seconds with fade out
+                    setTimeout(() => {
+                        this.isFading = true;
+                        setTimeout(() => {
+                            this.uploadMessage = '';
+                            this.isFading = false;
+                        }, 1000);
+                    }, 4000);
+                },
+                error: (error) => {
+                    console.error('Delete error:', error);
+                    const errorMsg = error.error?.error || 'Dosya silinirken hata oluştu';
+                    this.uploadMessage = errorMsg;
+
+                    // Clear error after 5 seconds with fade out
+                    setTimeout(() => {
+                        this.isFading = true;
+                        setTimeout(() => {
+                            this.uploadMessage = '';
+                            this.isFading = false;
+                        }, 1000);
+                    }, 4000);
+                }
+            });
+        }
+    }
+
     formatDate(date: Date | undefined): string {
         if (!date) return '';
         return new Date(date).toLocaleString('tr-TR');

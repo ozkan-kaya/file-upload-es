@@ -9,8 +9,10 @@ const {
     initElasticsearch,
     indexDocument,
     searchDocuments,
+    deleteDocument,
     checkConnection
 } = require('./elasticsearch');
+const { syncFilesWithElasticsearch } = require('./sync');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -195,6 +197,35 @@ app.get('/api/files', async (req, res) => {
     }
 });
 
+// Delete file endpoint
+app.delete('/api/files/:filename', async (req, res) => {
+    try {
+        const filename = req.params.filename;
+        const filePath = path.join(uploadsDir, filename);
+
+        // Check if file exists
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ error: 'Dosya bulunamadı' });
+        }
+
+        // Delete from filesystem
+        fs.unlinkSync(filePath);
+        console.log(`File deleted from filesystem: ${filename}`);
+
+        // Delete from Elasticsearch
+        await deleteDocument(filename);
+        console.log(`File deleted from Elasticsearch: ${filename}`);
+
+        res.json({
+            message: 'Dosya başarıyla silindi',
+            filename: filename
+        });
+    } catch (error) {
+        console.error('Delete file error:', error);
+        res.status(500).json({ error: 'Dosya silinirken hata oluştu' });
+    }
+});
+
 // Health check
 app.get('/api/health', async (req, res) => {
     const esConnected = await checkConnection();
@@ -213,6 +244,10 @@ async function startServer() {
 
         if (isConnected) {
             await initElasticsearch();
+
+            // Synchronize files with Elasticsearch
+            console.log('Synchronizing files with Elasticsearch...');
+            await syncFilesWithElasticsearch();
         } else {
             console.warn('Elasticsearch is not available. Search functionality will not work.');
         }

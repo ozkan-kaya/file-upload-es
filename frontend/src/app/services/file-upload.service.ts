@@ -54,6 +54,10 @@ export class FileUploadService {
         });
     }
 
+    deleteFile(filename: string): Observable<{ message: string; filename: string }> {
+        return this.http.delete<{ message: string; filename: string }>(`${this.apiUrl}/files/${filename}`);
+    }
+
     getFileUrl(path: string): string {
         return `${environment.apiUrl}${path}`;
     }
