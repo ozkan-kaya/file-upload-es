@@ -1,4 +1,7 @@
 const { Client } = require('@elastic/elasticsearch');
+const fs = require('fs');
+const path = require('path');
+const { extractText } = require('./textExtractor');
 
 const client = new Client({
     node: process.env.ELASTICSEARCH_NODE || 'http://localhost:9200'
@@ -6,14 +9,12 @@ const client = new Client({
 
 const INDEX_NAME = 'documents';
 
-// Initialize Elasticsearch - create index if not exists
+// Elasticsearch indeksini özel analizörler ve mapping ile başlat
 async function initElasticsearch() {
     try {
-        // Check if index exists
         const indexExists = await client.indices.exists({ index: INDEX_NAME });
 
         if (!indexExists) {
-            // Create index with mapping and custom analyzer
             await client.indices.create({
                 index: INDEX_NAME,
                 body: {
@@ -23,135 +24,122 @@ async function initElasticsearch() {
                                 filename_analyzer: {
                                     type: 'custom',
                                     tokenizer: 'standard',
-                                    filter: ['lowercase', 'word_delimiter']
+                                    filter: ['lowercase', 'filename_word_delimiter']
+                                }
+                            },
+                            filter: {
+                                filename_word_delimiter: {
+                                    type: 'word_delimiter',
+                                    generate_word_parts: true,
+                                    generate_number_parts: true,
+                                    catenate_words: true,
+                                    catenate_numbers: true,
+                                    catenate_all: true,
+                                    split_on_case_change: true,
+                                    preserve_original: true,
+                                    split_on_numerics: false  // Alfanümerik karakterleri bir arada tut (ör: "abc123")
                                 }
                             }
                         }
                     },
                     mappings: {
                         properties: {
-                            filename: {
-                                type: 'text',
-                                analyzer: 'filename_analyzer'
-                            },
-                            originalname: {
-                                type: 'text',
-                                analyzer: 'filename_analyzer'
-                            },
+                            originalname: { type: 'text', analyzer: 'filename_analyzer' },
                             content: {
                                 type: 'text',
-                                analyzer: 'standard'
+                                analyzer: 'standard',
+                                fields: {
+                                    exact: { type: 'text', analyzer: 'whitespace' }  // Tam ifade eşleşmesi için
+                                }
                             },
-                            mimetype: { type: 'keyword' },
                             size: { type: 'long' },
-                            uploadDate: { type: 'date' },
-                            path: { type: 'keyword' }
+                            uploadDate: { type: 'date' }
                         }
                     }
                 }
             });
-            console.log(`Elasticsearch index '${INDEX_NAME}' created`);
+            console.log(`Elasticsearch indeksi '${INDEX_NAME}' oluşturuldu`);
         } else {
-            console.log(`Elasticsearch index '${INDEX_NAME}' already exists`);
+            console.log(`Elasticsearch indeksi '${INDEX_NAME}' zaten mevcut`);
         }
     } catch (error) {
-        console.error('Elasticsearch init error:', error.message);
+        console.error('Elasticsearch başlatma hatası:', error.message);
         throw error;
     }
 }
 
-// Index a document in Elasticsearch
+// Belgeyi Elasticsearch dizinine ekle
 async function indexDocument(doc) {
     try {
         const response = await client.index({
             index: INDEX_NAME,
-            id: doc.filename, // Use filename as document ID (filenames are unique)
+            id: doc.filename,  // Dosya adına göre benzersiz ID
             body: {
                 filename: doc.filename,
                 originalname: doc.originalname,
                 content: doc.content || '',
-                mimetype: doc.mimetype,
                 size: doc.size,
-                uploadDate: doc.uploadDate || new Date(),
-                path: doc.path
+                uploadDate: doc.uploadDate || new Date()
             }
         });
 
-        console.log(`Document indexed: ${doc.filename}`);
+        console.log(`Belge indekslendi: ${doc.filename}`);
         return response;
     } catch (error) {
-        console.error('Indexing error:', error.message);
+        console.error('İndeksleme hatası:', error.message);
         throw error;
     }
 }
 
-// Search documents in Elasticsearch
+// Gelişmiş 4 Katmanlı Strateji ile belge ara
 async function searchDocuments(query) {
     try {
         if (!query || query.trim() === '') {
-            // If no query, return all documents
             const response = await client.search({
                 index: INDEX_NAME,
-                body: {
-                    query: {
-                        match_all: {}
-                    },
-                    size: 100
-                }
+                body: { query: { match_all: {} }, size: 100 }
             });
             return response.hits.hits;
         }
 
-        // 5 katmanlı arama stratejisi: Tam eşleşme > Prefix > Fuzzy > Geniş arama > Daha Geniş arama
+        const q = query.trim();
+
         const response = await client.search({
             index: INDEX_NAME,
             body: {
                 query: {
                     bool: {
                         should: [
-                            // 1. Tam cümle eşleşmesi (en yüksek öncelik)
+                            // 1. Tam Eşleşme (Content.exact ve Filename) - Boost 100
+                            { match_phrase: { "content.exact": { query: q, boost: 100, slop: 0 } } },
+                            { match_phrase: { filename: { query: q, boost: 100, slop: 0 } } },
+
+                            // 2. VE Eşleşmesi (Content ve Filename) - Boost 50
                             {
                                 multi_match: {
-                                    query: query,
-                                    fields: ['filename^20', 'originalname^20', 'content^10'],
-                                    type: 'phrase',
-                                    boost: 100
-                                }
-                            },
-                            // 2. Kelime başlangıcı eşleşmesi
-                            {
-                                multi_match: {
-                                    query: query,
-                                    fields: ['filename^10', 'originalname^10', 'content^5'],
-                                    type: 'phrase_prefix',
+                                    query: q,
+                                    fields: ['filename^2', 'content'],
+                                    operator: 'and',
                                     boost: 50
                                 }
                             },
-                            // 3. Bulanık eşleşme (yazım hatası toleransı)
+
+                            // 3. Bulanık Eşleşme (Content ve Filename) - Boost 10
                             {
                                 multi_match: {
-                                    query: query,
-                                    fields: ['filename^5', 'originalname^5', 'content^2'],
+                                    query: q,
+                                    fields: ['filename', 'content'],
                                     fuzziness: 'AUTO',
                                     prefix_length: 1,
-                                    max_expansions: 50,
-                                    boost: 20
+                                    boost: 10
                                 }
                             },
-                            // 4. Tüm terimlerin varlığı (veya mantığı)
+
+                            // 4. VEYA Eşleşmesi (Content ve Filename) - Boost 1
                             {
                                 multi_match: {
-                                    query: query,
-                                    fields: ['filename^3', 'originalname^3', 'content'],
-                                    operator: 'and',
-                                    boost: 5
-                                }
-                            },
-                            // 5. En az bir terimin varlığı (veya mantığı)
-                            {
-                                multi_match: {
-                                    query: query,
-                                    fields: ['filename^2', 'originalname^2', 'content'],
+                                    query: q,
+                                    fields: ['filename', 'content'],
                                     operator: 'or',
                                     boost: 1
                                 }
@@ -163,11 +151,20 @@ async function searchDocuments(query) {
                 highlight: {
                     pre_tags: ['<span class="highlight">'],
                     post_tags: ['</span>'],
+                    order: 'score',
+                    // Önemli: highlight_query bulanık eşleşmeleri de kapsamalı (fuzzy highlighting için)
+                    highlight_query: {
+                        bool: {
+                            should: [
+                                { match: { "content.exact": { query: q } } },
+                                { match: { content: { query: q, fuzziness: 'AUTO' } } },
+                                { match: { filename: { query: q, fuzziness: 'AUTO' } } }
+                            ]
+                        }
+                    },
                     fields: {
-                        content: {
-                            fragment_size: 150,
-                            number_of_fragments: 3
-                        },
+                        content: { fragment_size: 150, number_of_fragments: 5, type: 'plain' },
+                        "content.exact": { fragment_size: 150, number_of_fragments: 5 },
                         filename: {},
                         originalname: {}
                     }
@@ -177,73 +174,192 @@ async function searchDocuments(query) {
         });
 
         return response.hits.hits;
+
     } catch (error) {
-        console.error('Search error:', error.message);
+        console.error('Arama hatası:', error.message);
         throw error;
     }
 }
 
-// Delete document from Elasticsearch
+// Elasticsearch'ten belge sil
 async function deleteDocument(filename) {
     try {
         await client.delete({
             index: INDEX_NAME,
             id: filename
         });
-        console.log(`Document deleted: ${filename}`);
+        console.log(`Belge silindi: ${filename}`);
     } catch (error) {
         if (error.meta?.statusCode !== 404) {
-            console.error('Delete error:', error.message);
+            console.error('Silme hatası:', error.message);
         }
     }
 }
 
-// Delete the entire index
+// Tüm indeksi sil
 async function deleteIndex() {
     try {
         if (await client.indices.exists({ index: INDEX_NAME })) {
             await client.indices.delete({ index: INDEX_NAME });
-            console.log(`Index '${INDEX_NAME}' deleted`);
+            console.log(`İndeks '${INDEX_NAME}' silindi`);
         } else {
-            console.log(`Index '${INDEX_NAME}' does not exist`);
+            console.log(`İndeks '${INDEX_NAME}' mevcut değil`);
         }
     } catch (error) {
-        console.error('Delete index error:', error.message);
+        console.error('İndeks silme hatası:', error.message);
         throw error;
     }
 }
 
-// Get all documents from Elasticsearch
+// Tüm belgeleri getir
 async function getAllDocuments() {
     try {
         const response = await client.search({
             index: INDEX_NAME,
             body: {
-                query: {
-                    match_all: {}
-                },
-                size: 10000 // Get all documents
+                query: { match_all: {} },
+                size: 10000
             }
         });
         return response.hits.hits;
     } catch (error) {
         if (error.meta?.statusCode === 404) {
-            // Index doesn't exist yet
-            return [];
+            return [];  // İndeks henüz mevcut değil
         }
-        console.error('Get all documents error:', error.message);
+        console.error('Tüm belgeleri getirme hatası:', error.message);
         throw error;
     }
 }
 
+// Elasticsearch bağlantısını kontrol et
 async function checkConnection() {
     try {
         await client.ping();
-        console.log('Elasticsearch is connected');
+        console.log('Elasticsearch bağlantısı başarılı');
         return true;
     } catch (error) {
-        console.error('Elasticsearch is not connected:', error.message);
+        console.error('Elasticsearch bağlantısı başarısız:', error.message);
         return false;
+    }
+}
+
+// Dosya uzantısından MIME türünü al
+const getMimeType = (filename) => {
+    const ext = path.extname(filename).toLowerCase();
+    switch (ext) {
+        case '.pdf': return 'application/pdf';
+        case '.doc': return 'application/msword';
+        case '.docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        case '.xls': return 'application/vnd.ms-excel';
+        case '.xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        default: return null; // Desteklenmeyen tür
+    }
+};
+
+// Dosya türünün desteklenip desteklenmediğini kontrol et
+const isSupportedFileType = (filename) => {
+    return getMimeType(filename) !== null;
+};
+
+// Uploads dizinini Elasticsearch ile senkronize et
+async function syncFilesWithElasticsearch() {
+    const uploadsDir = path.join(__dirname, 'uploads');
+    try {
+        console.log('Dosya senkronizasyonu başlatılıyor...');
+
+        // Uploads dizini yoksa oluştur
+        if (!fs.existsSync(uploadsDir)) {
+            console.log('Uploads dizini bulunamadı. Oluşturuluyor...');
+            fs.mkdirSync(uploadsDir);
+            console.log('Senkronizasyon tamamlandı: Senkronize edilecek dosya yok.');
+            return;
+        }
+
+        // Uploads dizinindeki dosyaları al
+        const filesInDirectory = fs.readdirSync(uploadsDir)
+            .filter(filename => {
+                const filePath = path.join(uploadsDir, filename);
+                const stats = fs.statSync(filePath);
+                return stats.isFile() && !filename.startsWith('.');
+            });
+
+        console.log(`Uploads dizininde ${filesInDirectory.length} dosya bulundu`);
+
+        // Elasticsearch'teki tüm belgeleri al
+        const documentsInES = await getAllDocuments();
+        const filenamesInES = new Set(documentsInES.map(doc => doc._id));
+
+        console.log(`Elasticsearch'te ${filenamesInES.size} belge bulundu`);
+
+        // Elasticsearch'te olup diskte olmayan (yetim) kayıtları bul
+        const orphanedRecords = documentsInES.filter(doc =>
+            !filesInDirectory.includes(doc._id)
+        );
+
+        // Yetim kayıtları sil
+        for (const doc of orphanedRecords) {
+            console.log(`Yetim kayıt siliniyor: ${doc._id}`);
+            await deleteDocument(doc._id);
+        }
+
+        if (orphanedRecords.length > 0) {
+            console.log(`${orphanedRecords.length} yetim kayıt Elasticsearch'ten silindi`);
+        }
+
+        // Diskte olup Elasticsearch'te olmayan yeni dosyaları bul
+        const newFiles = filesInDirectory.filter(filename =>
+            !filenamesInES.has(filename) && isSupportedFileType(filename)
+        );
+
+        // Yeni dosyaları indeksle
+        let indexedCount = 0;
+        let skippedCount = 0;
+
+        for (const filename of newFiles) {
+            const filePath = path.join(uploadsDir, filename);
+            const mimetype = getMimeType(filename);
+
+            if (!mimetype) {
+                console.log(`Desteklenmeyen dosya türü atlanıyor: ${filename}`);
+                skippedCount++;
+                continue;
+            }
+
+            try {
+                console.log(`Yeni dosya indeksleniyor: ${filename}`);
+                const stats = fs.statSync(filePath);
+
+                // Metni çıkar
+                const content = await extractText(filePath, mimetype);
+
+                // Belgeyi indeksle
+                await indexDocument({
+                    filename: filename,
+                    originalname: filename,
+                    content: content,
+                    size: stats.size,
+                    uploadDate: stats.mtime
+                });
+
+                console.log(`Başarıyla indekslendi: ${filename}`);
+                indexedCount++;
+
+            } catch (fileError) {
+                console.error(`${filename} indekslenirken hata oluştu:`, fileError.message);
+            }
+        }
+
+        // Özet
+        console.log('Senkronizasyon tamamlandı:');
+        console.log(`  - ${orphanedRecords.length} yetim kayıt silindi`);
+        console.log(`  - ${indexedCount} yeni dosya indekslendi`);
+        if (skippedCount > 0) {
+            console.log(`  - ${skippedCount} desteklenmeyen dosya atlandı`);
+        }
+
+    } catch (error) {
+        console.error('Senkronizasyon başarısız:', error);
+        throw error;
     }
 }
 
@@ -254,5 +370,6 @@ module.exports = {
     deleteDocument,
     deleteIndex,
     getAllDocuments,
-    checkConnection
+    checkConnection,
+    syncFilesWithElasticsearch
 };

@@ -10,9 +10,9 @@ const {
     indexDocument,
     searchDocuments,
     deleteDocument,
-    checkConnection
+    checkConnection,
+    syncFilesWithElasticsearch
 } = require('./elasticsearch');
-const { syncFilesWithElasticsearch } = require('./sync');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,7 +21,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Helper to get mimetype from extension
+// Uzantıdan MIME türünü al
 const getMimeType = (filename) => {
     const ext = path.extname(filename).toLowerCase();
     switch (ext) {
@@ -53,7 +53,7 @@ const storage = multer.diskStorage({
     }
 });
 
-// Allowed file types: Word, PDF, Excel
+// İzin verilen dosya türleri: Word, PDF, Excel
 const allowedMimeTypes = [
     'application/pdf', // PDF
     'application/msword', // Word (.doc)
@@ -75,10 +75,10 @@ const upload = multer({
     fileFilter: fileFilter
 });
 
-// Static files - uploads klasörünü servis et
+// Statik dosyalar - uploads klasörünü servis et
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// File upload endpoint with text extraction and Elasticsearch indexing
+// Dosya yükleme endpoint'i - metin çıkarma ve Elasticsearch indeksleme ile
 app.post('/api/upload', (req, res) => {
     upload.single('file')(req, res, async (err) => {
         if (err) {
@@ -92,26 +92,24 @@ app.post('/api/upload', (req, res) => {
         try {
             const filePath = path.join(uploadsDir, req.file.filename);
 
-            // Extract text from the uploaded file
-            console.log(`Extracting text from: ${req.file.originalname}`);
+            // Yüklenen dosyadan metin çıkar
+            console.log(`Metin çıkarılıyor: ${req.file.originalname}`);
             const content = await extractText(filePath, req.file.mimetype);
-            console.log(`Extracted ${content.length} characters`);
+            console.log(`${content.length} karakter çıkarıldı`);
 
-            // Index document in Elasticsearch
+            // Belgeyi Elasticsearch'e indeksle
             const doc = {
                 filename: req.file.filename,
                 originalname: req.file.originalname,
                 content: content,
-                mimetype: req.file.mimetype,
                 size: req.file.size,
-                uploadDate: new Date(),
-                path: `/uploads/${req.file.filename}`
+                uploadDate: new Date()
             };
 
             await indexDocument(doc);
 
             res.json({
-                message: 'Dosya başarıyla yüklendi ve indexlendi',
+                message: 'Dosya başarıyla yüklendi ve indekslendi',
                 file: {
                     filename: req.file.filename,
                     originalname: req.file.originalname,
@@ -122,17 +120,17 @@ app.post('/api/upload', (req, res) => {
                 }
             });
         } catch (error) {
-            console.error('Upload/Index error:', error);
-            res.status(500).json({ error: 'Dosya yüklenirken veya indexlenirken hata oluştu' });
+            console.error('Yükleme/İndeksleme hatası:', error);
+            res.status(500).json({ error: 'Dosya yüklenirken veya indekslenirken hata oluştu' });
         }
     });
 });
 
-// Search endpoint using Elasticsearch
+// Elasticsearch kullanarak arama endpoint'i
 app.get('/api/search', async (req, res) => {
     try {
         const query = req.query.q || '';
-        console.log(`Searching for: "${query}"`);
+        console.log(`Aranan: "${query}"`);
 
         const results = await searchDocuments(query);
 
@@ -140,9 +138,9 @@ app.get('/api/search', async (req, res) => {
             filename: hit._source.filename,
             originalname: hit._source.originalname,
             size: hit._source.size,
-            mimetype: hit._source.mimetype || getMimeType(hit._source.filename),
+            mimetype: getMimeType(hit._source.filename),
             uploadDate: hit._source.uploadDate,
-            path: hit._source.path,
+            path: `/uploads/${hit._source.filename}`,
             score: hit._score,
             highlights: hit.highlight || {}
         }));
@@ -153,7 +151,7 @@ app.get('/api/search', async (req, res) => {
             query: query
         });
     } catch (error) {
-        console.error('Search error:', error);
+        console.error('Arama hatası:', error);
         res.status(500).json({ error: 'Arama sırasında hata oluştu' });
     }
 });
@@ -163,20 +161,20 @@ app.get('/api/files', async (req, res) => {
         const query = req.query.q || '';
 
         if (query) {
-            // If there's a query, use Elasticsearch
+            // Eğer sorgu varsa Elasticsearch kullan
             const results = await searchDocuments(query);
             const files = results.map(hit => ({
                 filename: hit._source.filename,
                 originalname: hit._source.originalname,
                 size: hit._source.size,
                 uploadDate: hit._source.uploadDate,
-                path: hit._source.path,
+                path: `/uploads/${hit._source.filename}`,
                 highlights: hit.highlight || {}
             }));
             return res.json({ files: files });
         }
 
-        // Otherwise, return all files from filesystem
+        // Aksi takdirde, dosya sistemindeki tüm dosyaları getir
         const fileList = fs.readdirSync(uploadsDir).map(filename => {
             const filePath = path.join(uploadsDir, filename);
             const stats = fs.statSync(filePath);
@@ -192,73 +190,73 @@ app.get('/api/files', async (req, res) => {
 
         res.json({ files: fileList });
     } catch (error) {
-        console.error('List files error:', error);
+        console.error('Dosyaları listeleme hatası:', error);
         res.status(500).json({ error: 'Dosyalar listelenirken hata oluştu' });
     }
 });
 
-// Delete file endpoint
+// Dosya silme endpoint'i
 app.delete('/api/files/:filename', async (req, res) => {
     try {
         const filename = req.params.filename;
         const filePath = path.join(uploadsDir, filename);
 
-        // Check if file exists
+        // Dosyanın var olup olmadığını kontrol et
         if (!fs.existsSync(filePath)) {
             return res.status(404).json({ error: 'Dosya bulunamadı' });
         }
 
-        // Delete from filesystem
+        // Dosya sisteminden sil
         fs.unlinkSync(filePath);
-        console.log(`File deleted from filesystem: ${filename}`);
+        console.log(`Dosya sistemden silindi: ${filename}`);
 
-        // Delete from Elasticsearch
+        // Elasticsearch'ten sil
         await deleteDocument(filename);
-        console.log(`File deleted from Elasticsearch: ${filename}`);
+        console.log(`Dosya Elasticsearch'ten silindi: ${filename}`);
 
         res.json({
             message: 'Dosya başarıyla silindi',
             filename: filename
         });
     } catch (error) {
-        console.error('Delete file error:', error);
+        console.error('Dosya silme hatası:', error);
         res.status(500).json({ error: 'Dosya silinirken hata oluştu' });
     }
 });
 
-// Health check
+// Sağlık kontrolü
 app.get('/api/health', async (req, res) => {
     const esConnected = await checkConnection();
     res.json({
         status: 'OK',
-        message: 'Server is running',
-        elasticsearch: esConnected ? 'Connected' : 'Disconnected'
+        message: 'Sunucu çalışıyor',
+        elasticsearch: esConnected ? 'Bağlı' : 'Bağlı Değil'
     });
 });
 
-// Initialize Elasticsearch and start server
+// Elasticsearch'ü başlat ve sunucuyu çalıştır
 async function startServer() {
     try {
-        console.log('Checking Elasticsearch connection...');
+        console.log('Elasticsearch bağlantısı kontrol ediliyor...');
         const isConnected = await checkConnection();
 
         if (isConnected) {
             await initElasticsearch();
 
-            // Synchronize files with Elasticsearch
-            console.log('Synchronizing files with Elasticsearch...');
+            // Dosyaları Elasticsearch ile senkronize et
+            console.log('Dosyalar Elasticsearch ile senkronize ediliyor...');
             await syncFilesWithElasticsearch();
         } else {
-            console.warn('Elasticsearch is not available. Search functionality will not work.');
+            console.warn('Elasticsearch kullanılamıyor. Arama işlevi çalışmayacak.');
         }
 
         app.listen(PORT, () => {
             const address = process.env.ADDRESS || 'http://localhost';
-            console.log(`Server running on ${address}:${PORT}`);
-            console.log(`Uploads directory: ${uploadsDir}`);
+            console.log(`Sunucu şurada çalışıyor: ${address}:${PORT}`);
+            console.log(`Uploads dizini: ${uploadsDir}`);
         });
     } catch (error) {
-        console.error('Server startup error:', error);
+        console.error('Sunucu başlatma hatası:', error);
         process.exit(1);
     }
 }

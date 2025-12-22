@@ -13,6 +13,7 @@ interface FileInfo {
     score?: number;
     highlights?: {
         content?: string[];
+        'content.exact'?: string[];
         filename?: string[];
         originalname?: string[];
     };

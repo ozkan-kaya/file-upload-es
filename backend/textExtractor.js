@@ -2,37 +2,37 @@ const fs = require('fs').promises;
 const pdfParse = require('pdf-parse'); // PDF
 const mammoth = require('mammoth'); // Word (.docx)
 const XLSX = require('xlsx'); // Excel (.xls, .xlsx)
-const textract = require('textract'); // Old word (.doc)
+const textract = require('textract'); // Eski Word (.doc)
 
-// Extract text from PDF file
+// PDF dosyasından metin çıkar
 async function extractTextFromPDF(filePath) {
     try {
         const dataBuffer = await fs.readFile(filePath);
         const data = await pdfParse(dataBuffer);
         return data.text || '';
     } catch (error) {
-        console.error('PDF extraction error:', error);
+        console.error('PDF çıkarma hatası:', error);
         return '';
     }
 }
 
-// Extract text from Word file
+// Word dosyasından metin çıkar
 async function extractTextFromWord(filePath) {
     try {
         const result = await mammoth.extractRawText({ path: filePath });
         return result.value || '';
     } catch (error) {
-        console.error('Word (.docx) extraction error:', error);
+        console.error('Word (.docx) çıkarma hatası:', error);
         return '';
     }
 }
 
-// Extract text from Old Word file
+// Eski Word dosyasından metin çıkar
 async function extractTextFromDoc(filePath) {
     return new Promise((resolve) => {
         textract.fromFileWithPath(filePath, { preserveLineBreaks: true }, (error, text) => {
             if (error) {
-                console.error('Old Word (.doc) extraction error:', error);
+                console.error('Eski Word (.doc) çıkarma hatası:', error);
                 resolve('');
             } else {
                 resolve(text || '');
@@ -41,7 +41,7 @@ async function extractTextFromDoc(filePath) {
     });
 }
 
-// Extract text from Excel file
+// Excel dosyasından metin çıkar
 async function extractTextFromExcel(filePath) {
     try {
         const workbook = XLSX.readFile(filePath);
@@ -60,12 +60,12 @@ async function extractTextFromExcel(filePath) {
 
         return text.trim();
     } catch (error) {
-        console.error('Excel extraction error:', error);
+        console.error('Excel çıkarma hatası:', error);
         return '';
     }
 }
 
-// Extract text from file
+// Dosyadan metin çıkar (Ana Fonksiyon)
 async function extractText(filePath, mimetype) {
     try {
         switch (mimetype) {
@@ -83,11 +83,11 @@ async function extractText(filePath, mimetype) {
                 return await extractTextFromExcel(filePath);
 
             default:
-                console.warn(`Unsupported mimetype: ${mimetype}`);
+                console.warn(`Desteklenmeyen dosya türü: ${mimetype}`);
                 return '';
         }
     } catch (error) {
-        console.error('Something went wrong, text extraction error:', error);
+        console.error('Bir hata oluştu, metin çıkarma hatası:', error);
         return '';
     }
 }

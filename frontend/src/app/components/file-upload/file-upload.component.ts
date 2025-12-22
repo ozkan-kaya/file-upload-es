@@ -16,6 +16,7 @@ interface FileInfo {
     score?: number;
     highlights?: {
         content?: string[];
+        'content.exact'?: string[];
         filename?: string[];
         originalname?: string[];
     };
@@ -47,7 +48,7 @@ export class FileUploadComponent implements OnInit, OnDestroy {
     ngOnInit(): void {
         this.loadFiles();
 
-        // Setup debounced search with backend Elasticsearch
+        // Debounced search with Elasticsearch backend
         this.searchSubject.pipe(
             debounceTime(300),
             distinctUntilChanged(),
@@ -59,7 +60,6 @@ export class FileUploadComponent implements OnInit, OnDestroy {
             })
         ).subscribe(response => {
             this.filteredFiles = response.files;
-            // Sonuçlar geldiğinde arama modunda olup olmadığımızı belirle
             this.isShowingSearchResults = !!(this.searchTerm && this.searchTerm.trim().length > 0);
         });
     }
@@ -72,20 +72,33 @@ export class FileUploadComponent implements OnInit, OnDestroy {
         this.searchSubject.next(searchTerm);
     }
 
+    // Check if file has content matches (not just filename matches)
     hasContentMatch(file: FileInfo): boolean {
-        return !!(file.highlights && file.highlights.content && file.highlights.content.length > 0);
+        return !!(file.highlights && (
+            (file.highlights.content && file.highlights.content.length > 0) ||
+            (file.highlights['content.exact'] && file.highlights['content.exact'].length > 0)
+        ));
     }
 
+    // Get highlighted content snippets, joined with "..."
     getHighlightSnippet(file: FileInfo): SafeHtml {
+        if (file.highlights?.['content.exact'] && file.highlights['content.exact'].length > 0) {
+            const processedHtml = file.highlights['content.exact']
+                .map(h => this.processHighlights(h))
+                .join(' ... ');
+            return this.sanitizer.bypassSecurityTrustHtml(processedHtml);
+        }
         if (file.highlights?.content && file.highlights.content.length > 0) {
-            const processedHtml = this.processHighlights(file.highlights.content[0]);
+            const processedHtml = file.highlights.content
+                .map(h => this.processHighlights(h))
+                .join(' ... ');
             return this.sanitizer.bypassSecurityTrustHtml(processedHtml);
         }
         return '';
     }
 
+    // Get highlighted filename or fallback to plain name
     getHighlightedFilename(file: FileInfo): SafeHtml {
-        // Check if filename has highlights from Elasticsearch
         if (file.highlights?.filename && file.highlights.filename.length > 0) {
             const processedHtml = this.processHighlights(file.highlights.filename[0]);
             return this.sanitizer.bypassSecurityTrustHtml(processedHtml);
@@ -94,27 +107,42 @@ export class FileUploadComponent implements OnInit, OnDestroy {
             const processedHtml = this.processHighlights(file.highlights.originalname[0]);
             return this.sanitizer.bypassSecurityTrustHtml(processedHtml);
         }
-        // If no highlight, return plain originalname or filename
         return file.originalname || file.filename;
     }
 
+    /**
+     * Process highlight HTML with custom coloring:
+     * - Yellow (highlight): Exact phrase/term matches
+     * - Blue (highlight-fuzzy): Fuzzy/Approximate matches
+     * 
+     * Simplified logic: We trust Elasticsearch returned highlights in <span class="highlight">.
+     * We just check if the content inside is an exact query term match.
+     */
     private processHighlights(html: string): string {
-        if (!this.searchTerm || !this.searchTerm.trim()) return html;
+        if (!this.searchTerm || !this.searchTerm.trim() || !html) return html;
 
         const term = this.searchTerm.trim().toLowerCase();
-        // Elasticsearch highlights are inside <span class="highlight">...</span>
-        return html.replace(/<span class="highlight">(.*?)<\/span>/g, (match, content) => {
-            const highlightedText = content.replace(/<[^>]*>/g, '').trim().toLowerCase();
+        // Split query into terms for strict token matching
+        const terms = term.split(/\s+/).filter(t => t.length > 0);
 
-            // Sadece birebir kelime eşleşmesi durumunda sarı (original highlight) kalsın
-            if (highlightedText === term) {
-                return match;
+        // Replace <span class="highlight"> based on content exactness
+        return html.replace(/<span class="highlight">(.*?)<\/span>/gi, (match, content) => {
+            const lowerContent = content.toLowerCase();
+
+            // Check if content matches any query term exactly OR matches the full query phrase
+            const isExact = terms.some(t => t === lowerContent) || term === lowerContent;
+
+            if (isExact) {
+                return `<span class="highlight">${content}</span>`;
+            } else {
+                return `<span class="highlight-fuzzy">${content}</span>`;
             }
-
-            // Eğer aranan terim vurgulanan metnin sadece bir parçasıysa (örn: "jun" -> "june") 
-            // veya yazım hatası toleransı ile gelmişse mavimsi (fuzzy) yap
-            return match.replace('class="highlight"', 'class="highlight-fuzzy"');
         });
+    }
+
+    // Escape special regex characters
+    private escapeRegExp(string: string): string {
+        return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
     onFileSelected(event: any): void {
@@ -147,13 +175,13 @@ export class FileUploadComponent implements OnInit, OnDestroy {
                     fileInput.value = '';
                 }
 
-                // Clear message after 5 seconds with fade out
+                // Fade out message after delay
                 setTimeout(() => {
                     this.isFading = true;
                     setTimeout(() => {
                         this.uploadMessage = '';
                         this.isFading = false;
-                    }, 1000); // 1s matches fadeOut animation duration
+                    }, 1000);
                 }, 4000);
             },
             error: (error) => {
@@ -162,7 +190,6 @@ export class FileUploadComponent implements OnInit, OnDestroy {
                 this.uploadMessage = errorMsg;
                 this.uploadProgress = false;
 
-                // Clear error after 5 seconds with fade out
                 setTimeout(() => {
                     this.isFading = true;
                     setTimeout(() => {
@@ -187,6 +214,7 @@ export class FileUploadComponent implements OnInit, OnDestroy {
         });
     }
 
+    // Get Font Awesome icon class based on file type
     getFileIcon(mimetype: string | undefined): string {
         if (!mimetype) return 'fa-file-alt';
 
@@ -223,7 +251,6 @@ export class FileUploadComponent implements OnInit, OnDestroy {
                     this.uploadMessage = response.message;
                     this.loadFiles();
 
-                    // Clear message after 5 seconds with fade out
                     setTimeout(() => {
                         this.isFading = true;
                         setTimeout(() => {
@@ -237,7 +264,6 @@ export class FileUploadComponent implements OnInit, OnDestroy {
                     const errorMsg = error.error?.error || 'Dosya silinirken hata oluştu';
                     this.uploadMessage = errorMsg;
 
-                    // Clear error after 5 seconds with fade out
                     setTimeout(() => {
                         this.isFading = true;
                         setTimeout(() => {
